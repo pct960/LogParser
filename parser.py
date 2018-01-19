@@ -1,3 +1,4 @@
+from celery import Celery
 import json
 import subprocess
 import select
@@ -5,15 +6,15 @@ import hashlib
 import time
 import hmac
 import psycopg2
-import sys
+from threads import batch_insert
 
+app = Celery('parser', backend='amqp', broker='pyamqp://guest@localhost//')
 
 def main():
     f = subprocess.Popen(['tail','-F',"-n+1","/data/logs/kong/file.json"], stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     p = select.poll()
     p.register(f.stdout)
     global i
-
     while True:
         if p.poll(1):
             s=str(f.stdout.readline())
@@ -24,8 +25,8 @@ def main():
             t1=time.time()-t
             print(t1)
 
-def parse(log_line):
 
+def parse(log_line):
     formatted=""
     data=dict()
 
@@ -96,6 +97,7 @@ def addHash(parsed_line):
 
     global i
     global rows
+    global task
     temp_row=parsed_line+"~"
     temp = parsed_line.split()
     logLine=""
@@ -108,16 +110,11 @@ def addHash(parsed_line):
         hex_dig = hash_object.hexdigest()
         temp.insert(3,hex_dig)
     else:
-        f = subprocess.Popen(['tail', '-1', "/data/logs/kong/kong.log"], stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-        p = select.poll()
-        p.register(f.stdout)
+        prev_hash=str(rows[-1]).split("~")[1]
+        temp.insert(3, prev_hash)
 
-        if p.poll(1):
-            prev_logline = str(f.stdout.readline()).split()
-            prev_hash=prev_logline[-1].replace("\\n","")[:-1]
-            temp.insert(3, prev_hash)
 
-        logLine = " ".join(temp)
+    logLine = " ".join(temp)
 
     hash_object=hmac.new(b'testkey',logLine.encode("UTF-8"),digestmod=hashlib.sha512)
     hex_dig = hash_object.hexdigest()
@@ -133,27 +130,9 @@ def addHash(parsed_line):
 
     rows.append(temp_row)
 
-    if(i==100):
-        batch_insert()
-
-def batch_insert():
-    global rows
-    global i
-    i = 0
-    conn = psycopg2.connect(database="postgres", user="postgres", password="password", host="127.0.0.1", port="5432")
-    cur = conn.cursor()
-    try:
-        for row in rows:
-            log=row.split("~")
-            cur.execute("insert into logs(logline,hash) values(%s,%s)",(log[0],log[1]))
-
-        conn.commit()
-        conn.close()
-        rows[:]=[]
-    except psycopg2.DatabaseError as e:
-        print(e)
-
-
+    if(i==10):
+        task=batch_insert.delay(rows)
+        print(task.ready())
 
 i = 0
 rows=[]
