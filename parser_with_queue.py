@@ -1,14 +1,13 @@
 import json,subprocess,select,hashlib,time,hmac,psycopg2,threading
-import queue
+import queue,configparser
 
 class BatchInsert(object):
 
-    global q
+    global q,conn,cur
 
     def __init__(self, interval=1):
 
         self.interval = interval
-
         thread = threading.Thread(target=self.run, args=())
         thread.daemon = True
         thread.start()
@@ -17,23 +16,43 @@ class BatchInsert(object):
 
         while True:
 
-            if not q.empty():
+            while not q.empty():
                 row_list = q.get()
-                conn = psycopg2.connect(database="postgres", user="postgres", password="password", host="127.0.0.1",port="5432")
-                cur = conn.cursor()
                 try:
                     cur.executemany("insert into logs(logline,hash) values(%s,%s)", row_list)
-                    conn.commit()
-                    conn.close()
                 except psycopg2.DatabaseError as e:
                     print(e)
 
-        time.sleep(self.interval)
+            conn.commit()
+
+            time.sleep(self.interval)
+
+class WriteToFile(object):
+
+    global file
+
+    def __init__(self, interval=1):
+
+        self.interval = interval
+        thread = threading.Thread(target=self.run, args=())
+        thread.daemon = True
+        thread.start()
+
+    def run(self):
+
+        while True:
+            while not log_queue.empty():
+                log=log_queue.get()
+                file.write(log+"\n")
+
+            time.sleep(self.interval)
 
 def main():
     f = subprocess.Popen(['tail','-F',"-n+1","/data/logs/kong/file.json"], stdout=subprocess.PIPE,stderr=subprocess.PIPE)
     p = select.poll()
     p.register(f.stdout)
+
+    global sum,count
 
     while True:
         if p.poll(1):
@@ -42,10 +61,14 @@ def main():
             t = time.time()
             parse(s)
             t1=time.time()-t
-            print(t1)
+            sum+=t1
+            print(sum/count)
 
 
 def parse(log_line):
+
+    global log_queue
+
     formatted=""
     data=dict()
 
@@ -110,34 +133,35 @@ def parse(log_line):
         formatted += resourceId + " " + apikey + " " + username + " " + consumerId + " " + response
         formatted=" ".join(formatted.split())
 
+        log_queue.put(formatted)
+
         addHash(formatted)
 
 def addHash(parsed_line):
 
-    global i
-    global rows
-    global last_hash
-    global tup
-    global q
+    global i,rows,last_hash,tup,q,count,hmac_key,first,file
 
     temp_row=()
     temp_row+=(parsed_line,)
     temp = parsed_line.split()
+
     logLine=""
 
     prev_hash = ""
     key=""
 
-    if i==0:
-        hash_object = hmac.new(b'testkey',"smartcity".encode("UTF-8"),digestmod=hashlib.sha512)
+    if i==0 and first==True:
+        hash_object = hmac.new(hmac_key,"smartcity".encode("UTF-8"),digestmod=hashlib.sha512)
         hex_dig = hash_object.hexdigest()
         temp.insert(3,hex_dig)
+        first=False
     else:
         temp.insert(3, last_hash)
 
     logLine = " ".join(temp)
 
-    hash_object=hmac.new(b'testkey',logLine.encode("UTF-8"),digestmod=hashlib.sha512)
+
+    hash_object=hmac.new(hmac_key,logLine.encode("UTF-8"),digestmod=hashlib.sha512)
     hex_dig = hash_object.hexdigest()
     temp_row+=(hex_dig,)
     temp.insert(len(temp),hex_dig)
@@ -145,16 +169,12 @@ def addHash(parsed_line):
     logLine=" ".join(temp)
 
     print(logLine)
-
-    file=open("/data/logs/kong/kong.log","a")
-    file.write(logLine)
-    file.write("\n")
-
     tup+=(temp_row,)
 
     i+=1
+    count+=1
 
-    if i==1000:
+    if i==500:
         i=0
         q.put(tup)
         rows[:]=[]
@@ -164,5 +184,27 @@ i = 0
 rows=[]
 q=queue.Queue()
 tup=()
+last_hash=""
+sum=0
+count=0
+
+config = configparser.ConfigParser()
+config.read_file(open("/home/pct960/PycharmProjects/LogParser/key.conf"))
+db_name=config.get('DATABASE','NAME')
+db_user=config.get('DATABASE','USER')
+db_password=config.get('DATABASE','PASSWORD')
+db_host=config.get('DATABASE','HOST')
+db_port=config.get('DATABASE','PORT')
+hmac_key=bytearray()
+hmac_key.extend(map(ord,str(config.get('HMAC','KEY'))))
+conn = psycopg2.connect(database=db_name, user=db_user, password=db_password, host=db_host,port=db_port)
+cur = conn.cursor()
+
+file=open("/data/logs/kong/kong.log","a")
+first=True
+log_queue=queue.Queue()
 thr=BatchInsert()
-main()
+thr_write=WriteToFile()
+
+if __name__ == '__main__':
+    main()
