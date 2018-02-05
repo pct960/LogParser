@@ -3,7 +3,7 @@ import queue,configparser
 
 class BatchInsert(object):
 
-    global q,conn,cur
+    global q,conn,cur,db_lock
 
     def __init__(self, interval=1):
 
@@ -15,6 +15,8 @@ class BatchInsert(object):
     def run(self):
 
         while True:
+
+            db_lock.acquire()
 
             while not q.empty():
                 row_list = q.get()
@@ -23,13 +25,14 @@ class BatchInsert(object):
                 except psycopg2.DatabaseError as e:
                     print(e)
 
+            db_lock.release()
             conn.commit()
 
             time.sleep(self.interval)
 
 class WriteToFile(object):
 
-    global file
+    global file,file_lock
 
     def __init__(self, interval=1):
 
@@ -41,9 +44,16 @@ class WriteToFile(object):
     def run(self):
 
         while True:
+
+            file_lock.acquire()
+
             while not log_queue.empty():
+                file = open("/data/logs/kong/kong.log", "a")
                 log=log_queue.get()
                 file.write(log+"\n")
+                file.close()
+
+            file_lock.release()
 
             time.sleep(self.interval)
 
@@ -67,7 +77,7 @@ def main():
 
 def parse(log_line):
 
-    global log_queue
+    global log_queue,file_lock
 
     formatted=""
     data=dict()
@@ -133,13 +143,15 @@ def parse(log_line):
         formatted += resourceId + " " + apikey + " " + username + " " + consumerId + " " + response
         formatted=" ".join(formatted.split())
 
+        file_lock.acquire()
         log_queue.put(formatted)
+        file_lock.release()
 
         addHash(formatted)
 
 def addHash(parsed_line):
 
-    global i,rows,last_hash,tup,q,count,hmac_key,first,file
+    global i,rows,last_hash,tup,q,count,hmac_key,first,file,db_lock
 
     temp_row=()
     temp_row+=(parsed_line,)
@@ -174,9 +186,11 @@ def addHash(parsed_line):
     i+=1
     count+=1
 
-    if i==500:
+    if i==100:
         i=0
+        db_lock.acquire()
         q.put(tup)
+        db_lock.release()
         rows[:]=[]
         tup=()
 
@@ -186,7 +200,7 @@ q=queue.Queue()
 tup=()
 last_hash=""
 sum=0
-count=0
+count=1
 
 config = configparser.ConfigParser()
 config.read_file(open("/home/pct960/PycharmProjects/LogParser/key.conf"))
@@ -199,8 +213,10 @@ hmac_key=bytearray()
 hmac_key.extend(map(ord,str(config.get('HMAC','KEY'))))
 conn = psycopg2.connect(database=db_name, user=db_user, password=db_password, host=db_host,port=db_port)
 cur = conn.cursor()
+db_lock=threading.Lock()
+file_lock=threading.Lock()
 
-file=open("/data/logs/kong/kong.log","a")
+
 first=True
 log_queue=queue.Queue()
 thr=BatchInsert()
@@ -208,3 +224,5 @@ thr_write=WriteToFile()
 
 if __name__ == '__main__':
     main()
+
+
