@@ -80,7 +80,7 @@ def parse(log_line):
     global log_queue,file_lock
 
     formatted=""
-    data=dict()
+    data = {}
 
     try:
         data=json.loads(log_line)
