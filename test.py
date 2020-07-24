@@ -11,27 +11,21 @@ def check():
 
     for row in rows:
 
-       if row_count==0:
+        if row_count==0:
 
-           seed_hash=hmac.new(b'wO5DWccVT8+vpSDKCPPN_NU4#3sU_Y8Vs!b9ftY|8iymQXphl_yf*yV72@AWpV$&*=67LTltScUS!v9Df|QYEG6X78C2a0d|?&i9WS4kgn1x1b4XBpJWuwR?bhGBu1yn',"smartcity".encode("UTF-8"),digestmod=hashlib.sha512).hexdigest()
-           temp=row[0].split(" ")
-           temp.insert(3,seed_hash)
-           hash=hmac.new(b'wO5DWccVT8+vpSDKCPPN_NU4#3sU_Y8Vs!b9ftY|8iymQXphl_yf*yV72@AWpV$&*=67LTltScUS!v9Df|QYEG6X78C2a0d|?&i9WS4kgn1x1b4XBpJWuwR?bhGBu1yn'," ".join(temp).encode("UTF-8"),digestmod=hashlib.sha512)
-           prev_hash=hash.hexdigest()
+            seed_hash=hmac.new(b'wO5DWccVT8+vpSDKCPPN_NU4#3sU_Y8Vs!b9ftY|8iymQXphl_yf*yV72@AWpV$&*=67LTltScUS!v9Df|QYEG6X78C2a0d|?&i9WS4kgn1x1b4XBpJWuwR?bhGBu1yn',"smartcity".encode("UTF-8"),digestmod=hashlib.sha512).hexdigest()
+            temp=row[0].split(" ")
+            temp.insert(3,seed_hash)
+        else:
+            temp = row[0].split(" ")
+            temp.insert(3, prev_hash)
+        hash=hmac.new(b'wO5DWccVT8+vpSDKCPPN_NU4#3sU_Y8Vs!b9ftY|8iymQXphl_yf*yV72@AWpV$&*=67LTltScUS!v9Df|QYEG6X78C2a0d|?&i9WS4kgn1x1b4XBpJWuwR?bhGBu1yn'," ".join(temp).encode("UTF-8"),digestmod=hashlib.sha512)
+        prev_hash=hash.hexdigest()
 
-           if prev_hash!=str(row[1]):
-               print("Not ok")
+        if prev_hash!=str(row[1]):
+            print("Not ok")
 
-       else:
-           temp = row[0].split(" ")
-           temp.insert(3, prev_hash)
-           hash=hmac.new(b'wO5DWccVT8+vpSDKCPPN_NU4#3sU_Y8Vs!b9ftY|8iymQXphl_yf*yV72@AWpV$&*=67LTltScUS!v9Df|QYEG6X78C2a0d|?&i9WS4kgn1x1b4XBpJWuwR?bhGBu1yn'," ".join(temp).encode("UTF-8"),digestmod=hashlib.sha512)
-           prev_hash = hash.hexdigest()
-
-           if prev_hash!=str(row[1]):
-               print("Not ok")
-
-       row_count+=1
+        row_count+=1
 
 if __name__ == '__main__':
   check()

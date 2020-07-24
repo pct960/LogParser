@@ -20,7 +20,7 @@ def main():
 
 def parse(log_line):
     formatted=""
-    data=dict()
+    data = {}
 
     try:
         data=json.loads(log_line)
